@@ -1,0 +1,171 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+      
+      - name: Install Android build tools
+        run: |
+          sdkmanager "build-tools;34.0.0"
+          sdkmanager "platforms;android-34"
+          sdkmanager "platform-tools"
+      
+      - name: Create WebView APK project
+        run: |
+          mkdir -p FundingRadar/app/src/main/java/com/fundingradar/app
+          mkdir -p FundingRadar/app/src/main/res/layout
+          mkdir -p FundingRadar/app/src/main/res/values
+          mkdir -p FundingRadar/app/src/main/res/mipmap-hdpi
+      
+      - name: Write Android source files
+        run: |
+          # settings.gradle
+          cat > FundingRadar/settings.gradle << 'EOF'
+          pluginManagement {
+            repositories {
+              google()
+              mavenCentral()
+              gradlePluginPortal()
+            }
+          }
+          dependencyResolutionManagement {
+            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+            repositories {
+              google()
+              mavenCentral()
+            }
+          }
+          rootProject.name = "FundingRadar"
+          include ':app'
+          EOF
+
+          # build.gradle (root)
+          cat > FundingRadar/build.gradle << 'EOF'
+          plugins {
+            id 'com.android.application' version '8.1.0' apply false
+          }
+          EOF
+
+          # app/build.gradle
+          cat > FundingRadar/app/build.gradle << 'EOF'
+          plugins {
+            id 'com.android.application'
+          }
+          android {
+            namespace 'com.fundingradar.app'
+            compileSdk 34
+            defaultConfig {
+              applicationId "com.fundingradar.app"
+              minSdk 21
+              targetSdk 34
+              versionCode 1
+              versionName "1.0"
+            }
+            buildTypes {
+              release {
+                minifyEnabled false
+              }
+            }
+            compileOptions {
+              sourceCompatibility JavaVersion.VERSION_17
+              targetCompatibility JavaVersion.VERSION_17
+            }
+          }
+          dependencies {
+            implementation 'androidx.appcompat:appcompat:1.6.1'
+          }
+          EOF
+
+          # AndroidManifest.xml
+          cat > FundingRadar/app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <application
+              android:label="Funding Radar"
+              android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+              <activity
+                android:name=".MainActivity"
+                android:exported="true">
+                <intent-filter>
+                  <action android:name="android.intent.action.MAIN"/>
+                  <category android:name="android.intent.category.LAUNCHER"/>
+                </intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          EOF
+
+          # MainActivity.java
+          cat > FundingRadar/app/src/main/java/com/fundingradar/app/MainActivity.java << 'EOF'
+          package com.fundingradar.app;
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          public class MainActivity extends Activity {
+            private WebView webView;
+            @Override
+            protected void onCreate(Bundle savedInstanceState) {
+              super.onCreate(savedInstanceState);
+              webView = new WebView(this);
+              setContentView(webView);
+              WebSettings settings = webView.getSettings();
+              settings.setJavaScriptEnabled(true);
+              settings.setDomStorageEnabled(true);
+              webView.setWebViewClient(new WebViewClient());
+              webView.loadUrl("https://funding-radar-static.loca.lt/funding-radar");
+            }
+            @Override
+            public void onBackPressed() {
+              if (webView.canGoBack()) webView.goBack();
+              else super.onBackPressed();
+            }
+          }
+          EOF
+
+          # strings.xml
+          cat > FundingRadar/app/src/main/res/values/strings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+            <string name="app_name">Funding Radar</string>
+          </resources>
+          EOF
+
+      - name: Setup Gradle wrapper
+        run: |
+          cd FundingRadar
+          gradle wrapper --gradle-version 8.4
+        
+      - name: Build debug APK
+        run: |
+          cd FundingRadar
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+      
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FundingRadar-v1.0
+          path: FundingRadar/app/build/outputs/apk/debug/app-debug.apk
