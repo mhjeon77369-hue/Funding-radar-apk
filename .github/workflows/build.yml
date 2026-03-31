@@ -116,10 +116,32 @@ jobs:
           include ':app'
           EOF
       
-      - name: Build APK
+      - name: Build APK with aapt
         run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          # Compile resources
+          aapt package -f -m -J app/src/main/java -M app/src/main/AndroidManifest.xml -S app/src/main/res -I $ANDROID_HOME/platforms/android-34/android.jar
+          
+          # Compile Java
+          javac -d app/build/classes -cp $ANDROID_HOME/platforms/android-34/android.jar app/src/main/java/com/fundingradar/app/*.java
+          
+          # Create DEX
+          mkdir -p app/build/dex
+          dx --dex --output=app/build/dex/classes.dex app/build/classes
+          
+          # Package APK
+          mkdir -p app/build/apk
+          aapt package -f -M app/src/main/AndroidManifest.xml -S app/src/main/res -I $ANDROID_HOME/platforms/android-34/android.jar -F app/build/apk/app-unsigned.apk app/build/classes
+          
+          # Add DEX to APK
+          cd app/build/apk && zip -r app-unsigned.apk ../dex/classes.dex && cd ../../..
+          
+          # Sign APK (debug key)
+          keytool -genkey -v -keystore debug.keystore -keyalg RSA -keysize 2048 -validity 10000 -alias androiddebugkey -keypass android -storepass android -dname "CN=Android Debug,O=Android,C=US" -noprompt 2>/dev/null || true
+          jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 -keystore debug.keystore -storepass android -keypass android app/build/apk/app-unsigned.apk androiddebugkey
+          
+          # Align APK
+          zipalign -v 4 app/build/apk/app-unsigned.apk app/build/outputs/apk/debug/app-debug.apk || cp app/build/apk/app-unsigned.apk app/build/outputs/apk/debug/app-debug.apk
+          mkdir -p app/build/outputs/apk/debug
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
